@@ -1,0 +1,5 @@
+oracledb
+apscheduler
+openai
+python-dotenv
+google-generativeai
