@@ -20,7 +20,6 @@ class MappingRule:
     use_yn: str
     target_yn: str        # 작업대상
     priority: int          # 기존 exe_order
-    ddl_sql: Optional[str] = None
     mig_sql: Optional[str] = None
     verify_sql: Optional[str] = None
     status: Optional[str] = None
