@@ -36,10 +36,9 @@ class MigrationOrchestrator:
                 logger.debug(f"[STEP_START] map_id={NEXT_SQL_INFO.map_id} | [Total Attempt {db_attempts}/{max_attempts}] | 1. LLM 쿼리 생성 요청")
                 ddl_sql, migration_sql, v_sql = generate_sqls(NEXT_SQL_INFO, last_error, last_sql)
                 
-                # DB 기록을 위해 DDL과 Migration을 합침 (기존 스키마 호환)
-                combined_mig_sql = f"{ddl_sql}\n/\n{migration_sql}" if ddl_sql else migration_sql
-                last_sql = combined_mig_sql
-                log_generated_sql(NEXT_SQL_INFO.map_id, combined_mig_sql, v_sql)
+                # DB 기록 (각 파트를 독립된 컬럼에 저장)
+                log_generated_sql(NEXT_SQL_INFO.map_id, ddl_sql, migration_sql, v_sql)
+                last_sql = migration_sql
                 
                 # 2. 클린업 및 실행
                 # 2a. 기존 테이블 삭제 (Clean Retry 환경 조성)

@@ -73,6 +73,7 @@ def create_infrastructure(cursor):
             CREATE TABLE NEXT_MIG_LOG (
                 LOG_ID NUMBER PRIMARY KEY,
                 MAP_ID NUMBER,
+                MIG_KIND VARCHAR2(20),
                 LOG_TYPE VARCHAR2(20),
                 LOG_LEVEL VARCHAR2(20),
                 STEP_NAME VARCHAR2(50),

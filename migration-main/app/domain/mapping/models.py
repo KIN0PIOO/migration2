@@ -5,7 +5,7 @@ from datetime import datetime
 @dataclass
 class MappingDetail:
     """DB에 저장된 메타데이터(NEXT_MIG_INFO_DTL)를 표현하는 객체"""
-    map_dtl_id: int
+    map_dtl: int
     map_id: int
     fr_col: str
     to_col: str
@@ -20,6 +20,7 @@ class MappingRule:
     use_yn: str
     target_yn: str        # 작업대상
     priority: int          # 기존 exe_order
+    ddl_sql: Optional[str] = None
     mig_sql: Optional[str] = None
     verify_sql: Optional[str] = None
     status: Optional[str] = None

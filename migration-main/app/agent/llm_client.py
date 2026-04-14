@@ -59,6 +59,7 @@ def generate_sqls(NEXT_SQL_INFO, last_error=None, last_sql=None):
 
     2. migration_sql (Migration Phase):
        - 데이터를 실제로 옮기는 'INSERT INTO ... SELECT ...' 문장만 포함하십시오.
+       - **절대 주의**: 'CREATE TABLE', 'DROP TABLE', 'TRUNCATE' 등의 DDL 문장은 이 필드에 포함하지 마십시오. 오직 DML(INSERT)만 포함해야 합니다.
        - 반드시 위에서 정의한 타겟 테이블('{to_table}')과 소스 테이블('{from_table}')을 사용하십시오.
        - 소스 테이블명에 'HR.' 등의 접두어가 없다면 임의로 붙이지 마십시오. (hallucination 주의)
        - 데이터 타입 변환(TO_DATE 등)이 필요한 경우 인라인으로 처리하십시오.

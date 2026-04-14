@@ -1,31 +1,29 @@
 from app.core.logger import logger
 from app.core.db import get_connection
 
-def log_generated_sql(map_id: int, migration_sql: str, verification_sql: str):
-    """(비즈니스 로그) LLM이 생성한 쿼리를 DB에 저장합니다."""
-    # (방어코드) LLM 결과가 List일 경우 String으로 병합 (ORA-01484 방지)
+def log_generated_sql(map_id: int, ddl_sql: str, migration_sql: str, verification_sql: str):
+    """(비즈니스 로그) LLM이 생성한 쿼리들을 DB에 저장합니다."""
     def ensure_string(val):
         if isinstance(val, list):
             return "\n".join(map(str, val))
         return str(val) if val is not None else ""
 
+    safe_ddl_sql = ensure_string(ddl_sql)
     safe_mig_sql = ensure_string(migration_sql)
     safe_v_sql = ensure_string(verification_sql)
 
-    logger.info(f"[HistoryRepo] map_id={map_id} | 마이그레이션 SQL DB 기록 진행")
-    logger.debug(f"[HistoryRepo] Migration: {safe_mig_sql[:50]}...")
-    logger.debug(f"[HistoryRepo] Verification: {safe_v_sql[:50]}...")
+    logger.info(f"[HistoryRepo] map_id={map_id} | 마이그레이션 SQL(DDL/DML/VERIFY) DB 기록 진행")
     
     query = """
         UPDATE NEXT_MIG_INFO
-        SET MIG_SQL = :1, VERIFY_SQL = :2, UPD_TS = CURRENT_TIMESTAMP
-        WHERE MAP_ID = :3
+        SET DDL_SQL = :1, MIG_SQL = :2, VERIFY_SQL = :3, UPD_TS = CURRENT_TIMESTAMP
+        WHERE MAP_ID = :4
     """
     
     try:
         with get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(query, (safe_mig_sql, safe_v_sql, map_id))
+            cursor.execute(query, (safe_ddl_sql, safe_mig_sql, safe_v_sql, map_id))
             conn.commit()
     except Exception as e:
         logger.error(f"[HistoryRepo] SQL 생성 내역 기록 중 오류: {e}")

@@ -18,10 +18,10 @@ def get_pending_jobs() -> list[MappingRule]:
         SELECT 
             R.MAP_ID, R.MAP_TYPE, R.FR_TABLE, R.TO_TABLE, 
             R.USE_YN, R.TARGET_YN, R.PRIORITY, 
-            R.MIG_SQL, R.VERIFY_SQL, R.STATUS, R.CORRECT_SQL, R.USER_EDITED, 
+            R.DDL_SQL, R.MIG_SQL, R.VERIFY_SQL, R.STATUS, R.CORRECT_SQL, R.USER_EDITED, 
             R.BATCH_CNT, R.ELAPSED_SECONDS, R.RETRY_COUNT,
             R.CREATED_AT, R.UPD_TS,
-            D.MAP_DTL_ID, D.FR_COL, D.TO_COL
+            D.MAP_DTL, D.FR_COL, D.TO_COL
         FROM NEXT_MIG_INFO R
         LEFT JOIN NEXT_MIG_INFO_DTL D ON R.MAP_ID = D.MAP_ID
         WHERE R.USE_YN = 'Y' 
@@ -46,27 +46,28 @@ def get_pending_jobs() -> list[MappingRule]:
                         use_yn=ensure_str(row[4]),
                         target_yn=ensure_str(row[5]),
                         priority=row[6],
-                        mig_sql=ensure_str(row[7]),
-                        verify_sql=ensure_str(row[8]),
-                        status=ensure_str(row[9]),
-                        correct_sql=ensure_str(row[10]),
-                        user_edited=ensure_str(row[11]),
-                        batch_cnt=row[12] if row[12] is not None else 0,
-                        elapsed_seconds=row[13] if row[13] is not None else 0,
-                        retry_count=row[14] if row[14] is not None else 0,
-                        created_at=row[15],
-                        upd_ts=row[16],
+                        ddl_sql=ensure_str(row[7]),
+                        mig_sql=ensure_str(row[8]),
+                        verify_sql=ensure_str(row[9]),
+                        status=ensure_str(row[10]),
+                        correct_sql=ensure_str(row[11]),
+                        user_edited=ensure_str(row[12]),
+                        batch_cnt=row[13] if row[13] is not None else 0,
+                        elapsed_seconds=row[14] if row[14] is not None else 0,
+                        retry_count=row[15] if row[15] is not None else 0,
+                        created_at=row[16],
+                        upd_ts=row[17],
                         details=[]
                     )
                     jobs[map_id] = rule
                 
-                # 디테일 정보가 있는 경우 추가 (LEFT JOIN이므로 D.MAP_DETAIL_ID가 NULL일 수 있음)
-                if row[17] is not None:
+                # 디테일 정보가 있는 경우 추가
+                if row[18] is not None:
                     detail = MappingDetail(
-                        map_dtl_id=row[17],
+                        map_dtl=row[18],
                         map_id=map_id,
-                        fr_col=ensure_str(row[18]),
-                        to_col=ensure_str(row[19])
+                        fr_col=ensure_str(row[19]),
+                        to_col=ensure_str(row[20])
                     )
                     jobs[map_id].details.append(detail)
                     
