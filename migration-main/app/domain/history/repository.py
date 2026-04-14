@@ -3,9 +3,18 @@ from app.core.db import get_connection
 
 def log_generated_sql(map_id: int, migration_sql: str, verification_sql: str):
     """(비즈니스 로그) LLM이 생성한 쿼리를 DB에 저장합니다."""
+    # (방어코드) LLM 결과가 List일 경우 String으로 병합 (ORA-01484 방지)
+    def ensure_string(val):
+        if isinstance(val, list):
+            return "\n".join(map(str, val))
+        return str(val) if val is not None else ""
+
+    safe_mig_sql = ensure_string(migration_sql)
+    safe_v_sql = ensure_string(verification_sql)
+
     logger.info(f"[HistoryRepo] map_id={map_id} | 마이그레이션 SQL DB 기록 진행")
-    logger.debug(f"[HistoryRepo] Migration: {migration_sql[:50]}...")
-    logger.debug(f"[HistoryRepo] Verification: {verification_sql[:50]}...")
+    logger.debug(f"[HistoryRepo] Migration: {safe_mig_sql[:50]}...")
+    logger.debug(f"[HistoryRepo] Verification: {safe_v_sql[:50]}...")
     
     query = """
         UPDATE NEXT_MIG_INFO
@@ -16,13 +25,13 @@ def log_generated_sql(map_id: int, migration_sql: str, verification_sql: str):
     try:
         with get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(query, (migration_sql, verification_sql, map_id))
+            cursor.execute(query, (safe_mig_sql, safe_v_sql, map_id))
             conn.commit()
     except Exception as e:
         logger.error(f"[HistoryRepo] SQL 생성 내역 기록 중 오류: {e}")
 
-def log_business_history(map_id: int, log_type: str, log_level: str, step_name: str, status: str, message: str, retry_count: int = 0):
-    """(비즈니스 로그) MIGRATION_LOG 테이블에 상세 이력을 저장합니다."""
+def log_business_history(map_id: int, log_type: str, log_level: str, step_name: str, status: str, message: str, retry_count: int = 0, mig_kind: str = "DB_MIG"):
+    """(비즈니스 로그) NEXT_MIG_LOG 테이블에 상세 이력을 저장합니다."""
     msg_str = str(message)
     if len(msg_str) > 4000:
         msg_str = msg_str[:3996] + "..."
@@ -31,14 +40,14 @@ def log_business_history(map_id: int, log_type: str, log_level: str, step_name: 
     
     query = """
         INSERT INTO NEXT_MIG_LOG (
-            LOG_ID, MAP_ID, LOG_TYPE, LOG_LEVEL, STEP_NAME, STATUS, MESSAGE, RETRY_COUNT
-        ) VALUES (MIGRATION_LOG_SEQ.NEXTVAL, :1, :2, :3, :4, :5, :6, :7)
+            LOG_ID, MAP_ID, MIG_KIND, LOG_TYPE, LOG_LEVEL, STEP_NAME, STATUS, MESSAGE, RETRY_COUNT
+        ) VALUES (MIGRATION_LOG_SEQ.NEXTVAL, :1, :2, :3, :4, :5, :6, :7, :8)
     """
     
     try:
         with get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(query, (map_id, log_type, log_level, step_name, status, msg_str, retry_count))
+            cursor.execute(query, (map_id, mig_kind, log_type, log_level, step_name, status, msg_str, retry_count))
             conn.commit()
     except Exception as e:
         logger.error(f"[HistoryRepo] 비즈니스 이력 기록 중 오류: {e}")

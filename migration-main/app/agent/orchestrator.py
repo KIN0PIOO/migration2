@@ -1,23 +1,26 @@
 import time
+import os
 from app.core.logger import logger
 from app.core.exceptions import (
     LLMBaseError, LLMAuthenticationError, LLMTokenLimitError, LLMInvalidRequestError,
     DBSqlError, VerificationFailError, BatchAbortError
 )
 from app.agent.llm_client import generate_sqls
-from app.agent.executor import execute_migration
-from app.agent.verifier import execute_verification
+from app.agent.executor import execute_migration, drop_table_if_exists
 from app.agent.verifier import execute_verification
 from app.domain.mapping.repository import update_job_status, increment_batch_count
 from app.domain.history.repository import log_generated_sql, log_business_history
 
 class MigrationOrchestrator:
-    def process_job(self, mapping_rule):
+    def __init__(self):
+        self.mig_kind = os.getenv("MIG_KIND", "DB_MIG")
+
+    def process_job(self, NEXT_SQL_INFO):
         logger.info(f"\n==========================================")
-        logger.info(f"[JOB_START] 대상 작업(map_id={mapping_rule.map_id}) 프로세스 시작")
+        logger.info(f"[JOB_START] 대상 작업(map_id={NEXT_SQL_INFO.map_id}) 프로세스 시작")
         
         # 0. BATCH_COUNT 증가 (작업 시작 기록)
-        increment_batch_count(mapping_rule.map_id)
+        increment_batch_count(NEXT_SQL_INFO.map_id)
         
         job_start_time = time.time()
         llm_retry_count = 0
@@ -28,47 +31,61 @@ class MigrationOrchestrator:
         
         while True:
             try:
-                # 1. SQL 생성 (피드백 반영)
-                # llm_client가 현재 몇 번째 시도인지 알 수 있도록 retry_count 동기화 (0부터 시작)
-                mapping_rule.retry_count = db_attempts - 1
-                logger.debug(f"[STEP_START] map_id={mapping_rule.map_id} | [Total Attempt {db_attempts}/{max_attempts}] | 1. LLM 쿼리 생성 요청")
-                migration_sql, verification_sql = generate_sqls(mapping_rule, last_error, last_sql)
-                last_sql = migration_sql # 이번 시도에 사용된 SQL 저장
-                log_generated_sql(mapping_rule.map_id, migration_sql, verification_sql)
+                # 1. SQL 생성 (DDL, Migration, Verification)
+                NEXT_SQL_INFO.retry_count = db_attempts - 1
+                logger.debug(f"[STEP_START] map_id={NEXT_SQL_INFO.map_id} | [Total Attempt {db_attempts}/{max_attempts}] | 1. LLM 쿼리 생성 요청")
+                ddl_sql, migration_sql, v_sql = generate_sqls(NEXT_SQL_INFO, last_error, last_sql)
                 
-                # 2. 마이그레이션 실행
-                logger.debug(f"[STEP_START] map_id={mapping_rule.map_id} | 2. 쿼리 파싱 및 DB 실행")
+                # DB 기록을 위해 DDL과 Migration을 합침 (기존 스키마 호환)
+                combined_mig_sql = f"{ddl_sql}\n/\n{migration_sql}" if ddl_sql else migration_sql
+                last_sql = combined_mig_sql
+                log_generated_sql(NEXT_SQL_INFO.map_id, combined_mig_sql, v_sql)
+                
+                # 2. 클린업 및 실행
+                # 2a. 기존 테이블 삭제 (Clean Retry 환경 조성)
+                to_table = NEXT_SQL_INFO.to_table
+                logger.debug(f"[STEP_START] map_id={NEXT_SQL_INFO.map_id} | 2a. 기존 타겟 테이블 삭제")
+                drop_table_if_exists(to_table)
+                
+                # 2b. DDL 실행 (테이블 생성)
+                if ddl_sql:
+                    logger.debug(f"[STEP_START] map_id={NEXT_SQL_INFO.map_id} | 2b. 타겟 테이블 생성 (DDL)")
+                    execute_migration(ddl_sql)
+                
+                # 2c. Migration 실행 (데이터 이관)
+                logger.debug(f"[STEP_START] map_id={NEXT_SQL_INFO.map_id} | 2c. 데이터 이관 실행 (DML)")
                 execute_migration(migration_sql)
                 
                 # 3. 검증 실행
-                if verification_sql:
-                    logger.debug(f"[STEP_START] map_id={mapping_rule.map_id} | 3. 데이터 정합성 검증")
-                    is_valid, v_msg = execute_verification(verification_sql)
+                if v_sql:
+                    logger.debug(f"[STEP_START] map_id={NEXT_SQL_INFO.map_id} | 3. 데이터 정합성 검증")
+                    is_valid, v_msg = execute_verification(v_sql)
                     if not is_valid:
                         raise VerificationFailError(f"데이터 불일치: {v_msg}")
                 
-                # 실행 무사고 시 바로 PASS 처리
+                # 성공 처리
                 elapsed = int(time.time() - job_start_time)
-                update_job_status(mapping_rule.map_id, "PASS", elapsed, db_attempts)
-                log_business_history(mapping_rule.map_id, "INFO", "INFO", "VERIFY", "PASS", "Migration Success", db_attempts)
-                logger.info(f"[JOB_PASS] map_id={mapping_rule.map_id} | >>> 마이그레이션 통과 <<<")
+                update_job_status(NEXT_SQL_INFO.map_id, "PASS", elapsed, db_attempts)
+                log_business_history(NEXT_SQL_INFO.map_id, "INFO", "INFO", "VERIFY", "PASS", "Migration Success", db_attempts, self.mig_kind)
+                logger.info(f"[JOB_PASS] map_id={NEXT_SQL_INFO.map_id} | >>> 마이그레이션 통과 <<<")
                 return
 
             except (LLMAuthenticationError, LLMTokenLimitError, LLMInvalidRequestError) as e:
-                logger.error(f"[BATCH_ABORT] map_id={mapping_rule.map_id} | >>> {e.__class__.__name__} 발생. 배치 즉시 중단 (작업은 Y로 유지) <<<")
-                raise BatchAbortError(f"LLM 致命 에러: {str(e)}") from e
+                logger.error(f"[BATCH_ABORT] map_id={NEXT_SQL_INFO.map_id} | >>> {e.__class__.__name__} 발생. 배치 즉시 중단 <<<")
+                raise BatchAbortError(f"LLM 치명적 에러: {str(e)}") from e
 
             except LLMBaseError as e:
                 llm_retry_count += 1
-                if llm_retry_count > 2: # Max 3 LLM attempts
+                if llm_retry_count > 2:
                     raise BatchAbortError(f"LLM 재시도 초과: {str(e)}") from e
-                logger.warning(f"[LLM_RETRY] map_id={mapping_rule.map_id} | retry={llm_retry_count} | {str(e)}")
+                logger.warning(f"[LLM_RETRY] map_id={NEXT_SQL_INFO.map_id} | retry={llm_retry_count} | {str(e)}")
                 time.sleep(1)
 
             except (DBSqlError, VerificationFailError) as e:
+                # ORA-00942 (테이블 미존재) 에러 등이 여기서 잡힐 수 있음
                 step_name = "SQL_EXEC" if isinstance(e, DBSqlError) else "VERIFY"
-                logger.error(f"[BUSINESS_RETRY] map_id={mapping_rule.map_id} | attempt={db_attempts} | {str(e)}")
-                log_business_history(mapping_rule.map_id, "ROW_ERROR", "WARN", step_name, "FAIL", str(e), db_attempts)
+                logger.error(f"[BUSINESS_RETRY] map_id={NEXT_SQL_INFO.map_id} | attempt={db_attempts} | {str(e)}")
+                log_business_history(NEXT_SQL_INFO.map_id, "ROW_ERROR", "WARN", step_name, "FAIL", str(e), db_attempts, self.mig_kind)
                 
                 last_error = str(e)
                 if db_attempts < max_attempts:
@@ -76,7 +93,7 @@ class MigrationOrchestrator:
                     time.sleep(1)
                 else:
                     elapsed = int(time.time() - job_start_time)
-                    logger.error(f"[JOB_FAIL] map_id={mapping_rule.map_id} | >>> 최대 시도({max_attempts}회) 도달. FAIL 판정 <<<")
-                    update_job_status(mapping_rule.map_id, "FAIL", elapsed, db_attempts)
-                    log_business_history(mapping_rule.map_id, "JOB_FAIL", "ERROR", step_name, "FAIL", "Max Attempts Reached", db_attempts)
+                    logger.error(f"[JOB_FAIL] map_id={NEXT_SQL_INFO.map_id} | >>> 최대 시도({max_attempts}회) 도달. FAIL 판정 <<<")
+                    update_job_status(NEXT_SQL_INFO.map_id, "FAIL", elapsed, db_attempts)
+                    log_business_history(NEXT_SQL_INFO.map_id, "JOB_FAIL", "ERROR", step_name, "FAIL", "Max Attempts Reached", db_attempts, self.mig_kind)
                     return

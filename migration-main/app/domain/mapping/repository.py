@@ -1,6 +1,13 @@
 from app.core.logger import logger
 from app.domain.mapping.models import MappingRule, MappingDetail
 from app.core.db import get_connection
+import oracledb
+
+def ensure_str(val):
+    """LOB 객체인 경우 문자열로 읽어 반환합니다."""
+    if val is not None and hasattr(val, 'read'):
+        return val.read()
+    return val
 
 def get_pending_jobs() -> list[MappingRule]:
     """USE_YN='Y' 이고 TASK_TARGET IS NOT NULL인 작업을 PRIORITY 순으로 가져옵니다."""
@@ -33,17 +40,17 @@ def get_pending_jobs() -> list[MappingRule]:
                 if map_id not in jobs:
                     rule = MappingRule(
                         map_id=map_id,
-                        map_type=row[1],
-                        fr_table=row[2],
-                        to_table=row[3],
-                        use_yn=row[4],
-                        target_yn=row[5],
+                        map_type=ensure_str(row[1]),
+                        fr_table=ensure_str(row[2]),
+                        to_table=ensure_str(row[3]),
+                        use_yn=ensure_str(row[4]),
+                        target_yn=ensure_str(row[5]),
                         priority=row[6],
-                        mig_sql=row[7],
-                        verify_sql=row[8],
-                        status=row[9],
-                        correct_sql=row[10],
-                        user_edited=row[11],
+                        mig_sql=ensure_str(row[7]),
+                        verify_sql=ensure_str(row[8]),
+                        status=ensure_str(row[9]),
+                        correct_sql=ensure_str(row[10]),
+                        user_edited=ensure_str(row[11]),
                         batch_cnt=row[12] if row[12] is not None else 0,
                         elapsed_seconds=row[13] if row[13] is not None else 0,
                         retry_count=row[14] if row[14] is not None else 0,
@@ -58,8 +65,8 @@ def get_pending_jobs() -> list[MappingRule]:
                     detail = MappingDetail(
                         map_dtl_id=row[17],
                         map_id=map_id,
-                        fr_col=row[18],
-                        to_col=row[19]
+                        fr_col=ensure_str(row[18]),
+                        to_col=ensure_str(row[19])
                     )
                     jobs[map_id].details.append(detail)
                     

@@ -6,6 +6,9 @@ from dotenv import load_dotenv
 # .env 로드는 시도하되, 실패해도 아래 기본값이 적용되도록 함
 load_dotenv()
 
+# CLOB/BLOB 데이터를 조회 시 자동으로 문자열/바이트로 변환 (DPI-1010 방지)
+oracledb.defaults.fetch_lobs = False
+
 # Oracle DB 접속 정보
 DB_USER = os.getenv("DB_USER") or "scott"
 DB_PASS = os.getenv("DB_PASS") or "tiger"
@@ -43,6 +46,12 @@ def get_connection():
             password=DB_PASS,
             dsn=dsn
         )
+        
+        # 3. 세션 날짜 형식 표준화 (ORA-01847 등 방지)
+        with connection.cursor() as cursor:
+            cursor.execute("ALTER SESSION SET NLS_DATE_FORMAT = 'YYYY-MM-DD HH24:MI:SS'")
+            cursor.execute("ALTER SESSION SET NLS_TIMESTAMP_FORMAT = 'YYYY-MM-DD HH24:MI:SS.FF'")
+            
         return connection
     except Exception as e:
         logger.error(f"[DB] Oracle 접속 중 에러 발생 ({mode_str}, USER: {DB_USER}): {e}")
