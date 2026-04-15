@@ -7,6 +7,20 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from app.core.db import get_connection
 
+# HR 소스 테이블 스키마 접두어 설정
+# - 로컬(11.2 XE): HR 계정이 별도 존재 → "HR."
+# - 회사 DB(21c): SCOTT 단독 스키마 → "" (빈 문자열)
+_HR_OWNER = os.getenv("HR_SCHEMA_PREFIX", "HR")
+HR = f"{_HR_OWNER}." if _HR_OWNER else ""
+
+
+def _h(sql: str) -> str:
+    """SQL 문자열 내 'HR.' 접두어를 환경 변수에 맞게 치환합니다.
+    - 로컬(기본): HR_SCHEMA_PREFIX=HR  → 'HR.' 유지
+    - 회사 DB:    HR_SCHEMA_PREFIX=''  → 'HR.' 제거 (SCOTT 단독 스키마)
+    """
+    return sql.replace("HR.", HR)
+
 
 def create_infrastructure(cursor):
     """마이그레이션 에이전트에 필요한 메타데이터 테이블 및 시퀀스를 생성합니다."""
@@ -215,9 +229,9 @@ FROM
                 PRIORITY, MIG_SQL, VERIFY_SQL, STATUS
             )
             VALUES (
-                :1, 'SIMPLE', 'HR.EMPLOYEES', 'TGT_EMP', 'Y', 'Y', 1, :2, :3, ''
+                :1, 'SIMPLE', :4, 'TGT_EMP', 'Y', 'Y', 1, :2, :3, ''
             )
-        """, (map_id_1, mig_sql_1, verify_sql_1))
+        """, (map_id_1, _h(mig_sql_1), _h(verify_sql_1), _h('HR.EMPLOYEES')))
 
         emp_cols = [
             (1, 'EMPLOYEE_ID', 'EMP_ID'),
@@ -363,11 +377,12 @@ FROM
             VALUES (
                 :1,
                 'COMPLEX',
-                'HR.EMPLOYEES E JOIN HR.JOBS J ON E.JOB_ID = J.JOB_ID',
+                :4,
                 'TGT_EMP_JOB',
                 'Y', 'Y', 3, :2, :3, ''
             )
-        """, (map_id_3, mig_sql_3, verify_sql_3))
+        """, (map_id_3, _h(mig_sql_3), _h(verify_sql_3),
+              _h('HR.EMPLOYEES E JOIN HR.JOBS J ON E.JOB_ID = J.JOB_ID')))
 
         join_cols = [
             (1, 'E.EMPLOYEE_ID', 'EMP_ID'),
