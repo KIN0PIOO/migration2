@@ -1,5 +1,6 @@
 import time
 import os
+import re
 from app.core.logger import logger
 from app.core.exceptions import (
     LLMBaseError, LLMAuthenticationError, LLMTokenLimitError, LLMInvalidRequestError,
@@ -10,6 +11,23 @@ from app.agent.executor import execute_migration, drop_table_if_exists
 from app.agent.verifier import execute_verification
 from app.domain.mapping.repository import update_job_status, increment_batch_count
 from app.domain.history.repository import log_generated_sql, log_business_history
+from app.core.db import fetch_table_ddl
+
+def _extract_table_names(fr_table: str) -> list:
+    """FR_TABLE 표현식(JOIN 포함)에서 실제 테이블명만 추출합니다."""
+    parts = re.split(
+        r'\b(?:(?:LEFT|RIGHT|FULL|INNER|CROSS)\s+(?:OUTER\s+)?)?JOIN\b',
+        fr_table, flags=re.IGNORECASE
+    )
+    tables = []
+    for part in parts:
+        # ON 조건 이후 제거
+        part = re.split(r'\bON\b', part, flags=re.IGNORECASE)[0].strip()
+        tokens = part.split()
+        if tokens and tokens[0].upper() not in ('SELECT', 'WITH', 'FROM', '('):
+            tables.append(tokens[0])
+    return tables
+
 
 class MigrationOrchestrator:
     def __init__(self):
@@ -28,13 +46,26 @@ class MigrationOrchestrator:
         max_attempts = 3
         last_error = None
         last_sql = None
-        
+
+        # 소스 테이블 DDL 정보 조회 (읽기 전용, 루프 밖에서 1회만 실행)
+        # FR_TABLE이 JOIN 표현식일 수 있으므로 테이블명만 파싱하여 각각 조회
+        source_ddl = {}
+        for tbl_name in _extract_table_names(NEXT_SQL_INFO.fr_table):
+            rows = fetch_table_ddl(tbl_name)
+            if rows:
+                source_ddl[tbl_name] = rows
+                logger.info(f"[DDL_FETCH] map_id={NEXT_SQL_INFO.map_id} | {tbl_name} 컬럼 {len(rows)}개 조회 완료")
+            else:
+                logger.warning(f"[DDL_FETCH] map_id={NEXT_SQL_INFO.map_id} | {tbl_name} DDL 조회 실패 — 타입 정보 없이 진행")
+        if not source_ddl:
+            source_ddl = None
+
         while True:
             try:
                 # 1. SQL 생성 (DDL, Migration, Verification)
                 NEXT_SQL_INFO.retry_count = db_attempts - 1
                 logger.debug(f"[STEP_START] map_id={NEXT_SQL_INFO.map_id} | [Total Attempt {db_attempts}/{max_attempts}] | 1. LLM 쿼리 생성 요청")
-                ddl_sql, migration_sql, v_sql = generate_sqls(NEXT_SQL_INFO, last_error, last_sql)
+                ddl_sql, migration_sql, v_sql = generate_sqls(NEXT_SQL_INFO, last_error, last_sql, source_ddl)
                 
                 # DB 기록 (MIG_SQL에는 INSERT만 저장하고, DDL은 메모리에서만 사용)
                 log_generated_sql(NEXT_SQL_INFO.map_id, migration_sql, v_sql)

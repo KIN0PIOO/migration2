@@ -19,6 +19,46 @@ DB_SID = os.getenv("DB_SID") or "xe"
 # Oracle Client Path (설정 시 Thick 모드 활성화)
 ORACLE_CLIENT_PATH = os.getenv("ORACLE_CLIENT_PATH")
 
+def fetch_table_ddl(table_name: str) -> list:
+    """소스 테이블의 컬럼 메타데이터를 읽기 전용으로 조회합니다 (DB 변경 없음).
+
+    Returns:
+        list of tuples: (COLUMN_NAME, DATA_TYPE, DATA_LENGTH, DATA_PRECISION, DATA_SCALE, NULLABLE)
+    """
+    if "." in table_name:
+        owner, tbl = table_name.upper().split(".", 1)
+    else:
+        owner, tbl = None, table_name.upper()
+
+    conn = None
+    try:
+        conn = get_connection()
+        with conn.cursor() as cursor:
+            if owner:
+                cursor.execute(
+                    "SELECT COLUMN_NAME, DATA_TYPE, DATA_LENGTH, DATA_PRECISION, DATA_SCALE, NULLABLE "
+                    "FROM ALL_TAB_COLUMNS "
+                    "WHERE OWNER = :1 AND TABLE_NAME = :2 "
+                    "ORDER BY COLUMN_ID",
+                    [owner, tbl]
+                )
+            else:
+                cursor.execute(
+                    "SELECT COLUMN_NAME, DATA_TYPE, DATA_LENGTH, DATA_PRECISION, DATA_SCALE, NULLABLE "
+                    "FROM USER_TAB_COLUMNS "
+                    "WHERE TABLE_NAME = :1 "
+                    "ORDER BY COLUMN_ID",
+                    [tbl]
+                )
+            return cursor.fetchall()
+    except Exception as e:
+        logger.warning(f"[DB] 소스 테이블 DDL 조회 실패 ({table_name}): {e}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+
 def get_connection():
     """Oracle DB에 접속하여 Connection 객체를 반환합니다 (Thin/Thick 동적 전환)."""
     try:
