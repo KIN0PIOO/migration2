@@ -155,7 +155,7 @@ def generate_sqls(NEXT_SQL_INFO, last_error=None, last_sql=None, source_ddl=None
 
     # [추가] 인간 전문가가 직접 수정한 정답 SQL이 있다면 프롬프트에 반영
     if NEXT_SQL_INFO.correct_sql:
-        logger.info(f"[LLM] map_id={NEXT_SQL_INFO.map_id} | 인간 전문가의 정답 SQL을 프롬프트에 반영합니다.")
+        #logger.info(f"[LLM] map_id={NEXT_SQL_INFO.map_id} | 인간 전문가의 정답 SQL을 프롬프트에 반영합니다.")
         prompt += f"\n\n[인간 전문가가 검증한 정답 SQL 예시]\n{NEXT_SQL_INFO.correct_sql}\n"
         prompt += "- 위 예시의 패턴을 참고하여 ddl_sql, migration_sql, verification_sql로 나누어 생성하십시오.\n"
 
@@ -169,7 +169,7 @@ def generate_sqls(NEXT_SQL_INFO, last_error=None, last_sql=None, source_ddl=None
         """
 
     try:
-        #logger.debug(f"[LLM_PROMPT] map_id={NEXT_SQL_INFO.map_id}\n{'='*60}\n{prompt}\n{'='*60}")
+        logger.debug(f"[LLM_PROMPT] map_id={NEXT_SQL_INFO.map_id}\n{'='*60}\n{prompt}\n{'='*60}")
         response = client.chat.completions.create(
             model=model_name,
             messages=[
